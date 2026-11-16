@@ -1,0 +1,229 @@
+from machine import Pin, SPI
+
+from time import sleep, ticks_ms, ticks_diff
+
+# Pin definitions for SPI interface and RCLK
+
+RCLK = 9  # Register clock pin
+
+SCK = 10  # SPI clock pin
+
+MOSI = 11 # SPI MOSI pin
+
+# Button pins
+
+BUTTON_INCREMENT_PIN = 12  # Pin for the Increment button
+
+BUTTON_DECREMENT_PIN = 13  # Pin for the Decrement button
+
+BUTTON_RESET_PIN = 14      # Pin for the Reset button
+
+# Segment code definitions for 7-segment display
+
+SEG8codes = [
+
+    0x3F,  # 0
+
+    0x06,  # 1
+
+    0x5B,  # 2
+
+    0x4F,  # 3
+
+    0x66,  # 4
+
+    0x6D,  # 5
+
+    0x7D,  # 6
+
+    0x07,  # 7
+
+    0x7F,  # 8
+
+    0x6F,  # 9
+
+    0x77,  # A
+
+    0x7C,  # b
+
+    0x39,  # C
+
+    0x5E,  # d
+
+    0x79,  # E
+
+    0x71,  # F
+
+]
+
+# Define LED positions (LED_1 for thousands, LED_2 for hundreds, etc.)
+
+LED_1 = 0xFE  # Thousands
+
+LED_2 = 0xFD  # Hundreds
+
+LED_3 = 0xFB  # Tens
+
+LED_4 = 0xF7  # Units
+
+class LED_8SEG_DISPLAY:
+
+    def __init__(self):
+
+        """Initialize the 8-segment display with SPI and RCLK pins."""
+
+        self.rclk = Pin(RCLK, Pin.OUT)
+
+        self.rclk.value(1)  # Initially set RCLK to high
+
+        self.spi = SPI(1, baudrate=10000000, polarity=0, phase=0,
+
+                       sck=Pin(SCK), mosi=Pin(MOSI))
+
+        self.SEG8 = SEG8codes
+
+    def write_cmd(self, num, seg):
+
+        """Send a command to the display to control which digit to show."""
+
+        self.rclk.value(1)  # Latch off
+
+        self.spi.write(bytearray([num]))  # Segment select (which digit)
+
+        self.spi.write(bytearray([seg]))  # Segment code (digit to display)
+
+        self.rclk.value(0)  # Latch on to update display
+
+        sleep(0.002)
+
+        self.rclk.value(1)  # Finish latching
+
+    def display_number(self, number):
+
+        """Display a 4-digit number on the 7-segment display."""
+
+        # Ensure the number is an integer
+
+        if not isinstance(number, int):
+
+            number = 0  # Default case for non-integer input
+
+        # Cap the number between 0 and 9999
+
+        number = max(0, min(number, 9999))
+
+        # Manually convert number to 4 digits
+
+        thousands = number // 1000
+
+        hundreds = (number % 1000) // 100
+
+        tens = (number % 100) // 10
+
+        ones = number % 10
+
+        # Write each digit to its corresponding segment
+
+        self.write_cmd(LED_1, self.SEG8[thousands])  # Thousands
+
+        self.write_cmd(LED_2, self.SEG8[hundreds])  # Hundreds
+
+        self.write_cmd(LED_3, self.SEG8[tens])      # Tens
+
+        self.write_cmd(LED_4, self.SEG8[ones])      # Units
+
+# Button debouncing with time-based checks
+
+def button_pressed(pin, last_press_time, debounce_delay=200):
+
+    """Check if the button is pressed and debounce it."""
+
+    current_time = ticks_ms()
+
+    if pin.value() == 0 and ticks_diff(current_time, last_press_time) > debounce_delay:
+
+        last_press_time = current_time
+
+        return True, last_press_time
+
+    return False, last_press_time
+
+# Main function
+
+if __name__ == '__main__':
+
+    # Create display object
+
+    display = LED_8SEG_DISPLAY()
+
+    # Set up buttons with pull-up resistors
+
+    button_increment = Pin(BUTTON_INCREMENT_PIN, Pin.IN, Pin.PULL_UP)  # Use PULL_UP to make the pin HIGH when button is pressed
+
+    button_decrement = Pin(BUTTON_DECREMENT_PIN, Pin.IN, Pin.PULL_UP)  # Use PULL_UP to make the pin HIGH when button is pressed
+
+    button_reset = Pin(BUTTON_RESET_PIN, Pin.IN, Pin.PULL_UP)  # Use PULL_UP to make the pin HIGH when button is pressed
+
+    # Initialize the current number
+
+    current_number = 0
+
+    last_increment_time = 0
+
+    last_decrement_time = 0
+
+    last_reset_time = 0
+
+    increment_pressed = False
+
+    decrement_pressed = False
+
+    while True:
+
+        # Check for button presses with debouncing
+
+        increment_pressed, last_increment_time = button_pressed(button_increment, last_increment_time)
+
+        decrement_pressed, last_decrement_time = button_pressed(button_decrement, last_decrement_time)
+
+        reset_pressed, last_reset_time = button_pressed(button_reset, last_reset_time)
+
+        # Increment the number only when the increment button is held down
+
+        if increment_pressed:
+
+            current_number += 1
+
+            if current_number > 9999:
+
+                current_number = 9999  # Limit to 4 digits
+
+            display.display_number(current_number)
+
+            print("Incrementing: ", current_number)  # Debugging output
+
+        # Decrement the number only when the decrement button is held down
+
+        elif decrement_pressed:
+
+            current_number -= 1
+
+            if current_number < 0:
+
+                current_number = 0  # Don't go below zero
+
+            display.display_number(current_number)
+
+            print("Decrementing: ", current_number)  # Debugging output
+
+        # Reset the number to 0 when the reset button is pressed
+
+        if reset_pressed:
+
+            current_number = 0
+
+            display.display_number(current_number)
+
+            print("Resetting: ", current_number)  # Debugging output
+
+        sleep(0.1)  # Small delay for stability and debouncing
